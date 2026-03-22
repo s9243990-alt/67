@@ -1,0 +1,554 @@
+-- Instant Steal GUI para Roblox
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local TeleportService = game:GetService("TeleportService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local savedPosition = nil
+
+-- Estados de toggles
+local boosterEnabled = false
+local noclipEnabled = false
+local infiniteJumpEnabled = false
+
+-- Valores originales
+local originalWalkSpeed = 16
+local originalJumpPower = 50
+
+-- Conexiones para desconectar después
+local boosterConnection = nil
+local noclipConnection = nil
+local jumpConnection = nil
+
+-- Keybinds
+local keybinds = {}
+local waitingForKey = nil
+local bindButtons = {}
+
+-- Instakill al ejecutar el script
+if player.Character and player.Character:FindFirstChild("Humanoid") then
+	player.Character.Humanoid.Health = 0
+end
+
+-- Esperar al respawn para guardar la posición
+player.CharacterAdded:Connect(function(char)
+	if not savedPosition then
+		char:WaitForChild("HumanoidRootPart")
+		wait(0.1)
+		savedPosition = char.HumanoidRootPart.CFrame
+	end
+	
+	-- Guardar valores originales del juego
+	local humanoid = char:WaitForChild("Humanoid")
+	originalWalkSpeed = humanoid.WalkSpeed
+	if humanoid.UseJumpPower then
+		originalJumpPower = humanoid.JumpPower
+	end
+	
+	-- Reconectar loops si estaban activos
+	if boosterEnabled then
+		setupBooster()
+	end
+	if noclipEnabled then
+		setupNoclip()
+	end
+	if infiniteJumpEnabled then
+		setupInfiniteJump()
+	end
+end)
+
+-- Crear ScreenGui
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "InstantStealGui"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = CoreGui
+
+-- Frame principal (ventana flotante)
+local mainFrame = Instance.new("Frame")
+mainFrame.Size = UDim2.new(0, 280, 0, 360)
+mainFrame.Position = UDim2.new(0.5, -140, 0.5, -180)
+mainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+mainFrame.BorderSizePixel = 0
+mainFrame.Active = true
+mainFrame.Draggable = true
+mainFrame.Parent = screenGui
+
+-- Esquinas redondeadas
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 8)
+corner.Parent = mainFrame
+
+-- Título
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 35)
+title.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+title.BorderSizePixel = 0
+title.Text = "mubashir hub :3"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.Parent = mainFrame
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 8)
+titleCorner.Parent = title
+
+-- Función para crear botones con keybind
+local function createButton(text, yPos, color)
+	local container = Instance.new("Frame")
+	container.Size = UDim2.new(0, 260, 0, 32)
+	container.Position = UDim2.new(0.5, -130, 0, yPos)
+	container.BackgroundTransparency = 1
+	container.Parent = mainFrame
+	
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(0, 160, 0, 32)
+	btn.Position = UDim2.new(0, 0, 0, 0)
+	btn.BackgroundColor3 = color
+	btn.BorderSizePixel = 0
+	btn.Text = text
+	btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	btn.Font = Enum.Font.GothamBold
+	btn.TextSize = 14
+	btn.Parent = container
+	
+	local btnCorner = Instance.new("UICorner")
+	btnCorner.CornerRadius = UDim.new(0, 6)
+	btnCorner.Parent = btn
+	
+	-- Botón para asignar keybind
+	local bindBtn = Instance.new("TextButton")
+	bindBtn.Size = UDim2.new(0, 45, 0, 32)
+	bindBtn.Position = UDim2.new(0, 165, 0, 0)
+	bindBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+	bindBtn.BorderSizePixel = 0
+	bindBtn.Text = "..."
+	bindBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	bindBtn.Font = Enum.Font.GothamBold
+	bindBtn.TextSize = 14
+	bindBtn.Parent = container
+	
+	local bindCorner = Instance.new("UICorner")
+	bindCorner.CornerRadius = UDim.new(0, 6)
+	bindCorner.Parent = bindBtn
+	
+	-- Botón para eliminar keybind
+	local unbindBtn = Instance.new("TextButton")
+	unbindBtn.Size = UDim2.new(0, 45, 0, 32)
+	unbindBtn.Position = UDim2.new(0, 215, 0, 0)
+	unbindBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
+	unbindBtn.BorderSizePixel = 0
+	unbindBtn.Text = "X"
+	unbindBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	unbindBtn.Font = Enum.Font.GothamBold
+	unbindBtn.TextSize = 14
+	unbindBtn.Parent = container
+	
+	local unbindCorner = Instance.new("UICorner")
+	unbindCorner.CornerRadius = UDim.new(0, 6)
+	unbindCorner.Parent = unbindBtn
+	
+	return btn, bindBtn, unbindBtn, container
+end
+
+-- Crear botones
+local stealBtn, stealBindBtn, stealUnbindBtn = createButton("Instant Steal", 45, Color3.fromRGB(200, 60, 60))
+local tpBaseBtn, tpBaseBindBtn, tpBaseUnbindBtn = createButton("TP to Base", 85, Color3.fromRGB(60, 120, 200))
+local clearBaseBtn, clearBaseBindBtn, clearBaseUnbindBtn = createButton("Clear Base", 125, Color3.fromRGB(180, 100, 60))
+local tpForwardBtn, tpForwardBindBtn, tpForwardUnbindBtn = createButton("TP Forward", 165, Color3.fromRGB(120, 60, 180))
+local serverHopBtn, serverHopBindBtn, serverHopUnbindBtn = createButton("ServerHop", 205, Color3.fromRGB(220, 80, 120))
+local boosterBtn, boosterBindBtn, boosterUnbindBtn = createButton("tuff booster", 245, Color3.fromRGB(100, 100, 100))
+local noclipBtn, noclipBindBtn, noclipUnbindBtn = createButton("Noclip", 285, Color3.fromRGB(100, 100, 100))
+local infJumpBtn, infJumpBindBtn, infJumpUnbindBtn = createButton("Infinite Jump", 325, Color3.fromRGB(100, 100, 100))
+
+-- Guardar referencias a los botones de bind
+bindButtons = {
+	instantSteal = {bind = stealBindBtn, unbind = stealUnbindBtn},
+	tpBase = {bind = tpBaseBindBtn, unbind = tpBaseUnbindBtn},
+	clearBase = {bind = clearBaseBindBtn, unbind = clearBaseUnbindBtn},
+	tpForward = {bind = tpForwardBindBtn, unbind = tpForwardUnbindBtn},
+	serverHop = {bind = serverHopBindBtn, unbind = serverHopUnbindBtn},
+	booster = {bind = boosterBindBtn, unbind = boosterUnbindBtn},
+	noclip = {bind = noclipBindBtn, unbind = noclipUnbindBtn},
+	infJump = {bind = infJumpBindBtn, unbind = infJumpUnbindBtn}
+}
+
+-- Funciones que ejecutan cada acción
+local buttonFunctions = {
+	instantSteal = function()
+		if not savedPosition then
+			stealBtn.Text = "Wait for respawn!"
+			wait(0.5)
+			stealBtn.Text = "Instant Steal"
+			return
+		end
+		
+		local char = player.Character
+		local camera = workspace.CurrentCamera
+		
+		if char and char:FindFirstChild("HumanoidRootPart") then
+			local hrp = char.HumanoidRootPart
+			local originalCFrame = hrp.CFrame
+			local originalCamCFrame = camera.CFrame
+			
+			camera.CameraType = Enum.CameraType.Scriptable
+			camera.CFrame = originalCamCFrame
+			
+			hrp.CFrame = savedPosition
+			wait(0.5)
+			hrp.CFrame = originalCFrame
+			
+			camera.CameraType = Enum.CameraType.Custom
+			
+			stealBtn.Text = "Stolen!"
+			wait(0.3)
+			stealBtn.Text = "Instant Steal"
+		end
+	end,
+	
+	tpBase = function()
+		if not savedPosition then
+			tpBaseBtn.Text = "No base saved!"
+			wait(0.5)
+			tpBaseBtn.Text = "TP to Base"
+			return
+		end
+		
+		local char = player.Character
+		if char and char:FindFirstChild("HumanoidRootPart") then
+			char.HumanoidRootPart.CFrame = savedPosition
+			tpBaseBtn.Text = "Teleported!"
+			wait(0.3)
+			tpBaseBtn.Text = "TP to Base"
+		end
+	end,
+	
+	clearBase = function()
+		local success, err = pcall(function()
+			game:GetService("ReplicatedStorage"):WaitForChild("Packages"):WaitForChild("Net"):WaitForChild("RF/AdminService/ResetBrainrots"):InvokeServer()
+		end)
+		
+		if success then
+			clearBaseBtn.Text = "Base Cleared!"
+			wait(0.5)
+			clearBaseBtn.Text = "Clear Base"
+		else
+			clearBaseBtn.Text = "Error!"
+			wait(0.5)
+			clearBaseBtn.Text = "Clear Base"
+		end
+	end,
+	
+	tpForward = function()
+		local char = player.Character
+		if char and char:FindFirstChild("HumanoidRootPart") then
+			local hrp = char.HumanoidRootPart
+			hrp.CFrame = hrp.CFrame + hrp.CFrame.LookVector * 1.4
+			
+			tpForwardBtn.Text = "Moved!"
+			wait(0.2)
+			tpForwardBtn.Text = "TP Forward"
+		end
+	end,
+	
+	serverHop = function()
+		serverHopBtn.Text = "Hopping..."
+		
+		local success, err = pcall(function()
+			local servers = {}
+			local req = game:HttpGet("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100")
+			local body = game:GetService("HttpService"):JSONDecode(req)
+			
+			if body and body.data then
+				for i, v in pairs(body.data) do
+					if v.id ~= game.JobId and v.playing < v.maxPlayers then
+						table.insert(servers, v.id)
+					end
+				end
+			end
+			
+			if #servers > 0 then
+				TeleportService:TeleportToPlaceInstance(game.PlaceId, servers[math.random(1, #servers)])
+			else
+				TeleportService:Teleport(game.PlaceId)
+			end
+		end)
+		
+		if not success then
+			serverHopBtn.Text = "Failed!"
+			wait(1)
+			serverHopBtn.Text = "ServerHop"
+		end
+	end,
+	
+	booster = function()
+		boosterEnabled = not boosterEnabled
+		
+		if boosterEnabled then
+			boosterBtn.BackgroundColor3 = Color3.fromRGB(60, 200, 80)
+			setupBooster()
+		else
+			boosterBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+			
+			if boosterConnection then
+				boosterConnection:Disconnect()
+			end
+			
+			local char = player.Character
+			if char then
+				local humanoid = char:FindFirstChild("Humanoid")
+				local hrp = char:FindFirstChild("HumanoidRootPart")
+				
+				if humanoid then
+					humanoid.WalkSpeed = originalWalkSpeed
+				end
+				
+				if hrp then
+					local bodyForce = hrp:FindFirstChild("Muhammad's Gravity")
+					if bodyForce then
+						bodyForce:Destroy()
+					end
+				end
+			end
+		end
+	end,
+	
+	noclip = function()
+		noclipEnabled = not noclipEnabled
+		
+		if noclipEnabled then
+			noclipBtn.BackgroundColor3 = Color3.fromRGB(60, 200, 80)
+			setupNoclip()
+		else
+			noclipBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+			
+			if noclipConnection then
+				noclipConnection:Disconnect()
+			end
+			
+			local char = player.Character
+			if char then
+				for _, part in pairs(char:GetDescendants()) do
+					if part:IsA("BasePart") then
+						part.CanCollide = true
+					end
+				end
+			end
+		end
+	end,
+	
+	infJump = function()
+		infiniteJumpEnabled = not infiniteJumpEnabled
+		
+		if infiniteJumpEnabled then
+			infJumpBtn.BackgroundColor3 = Color3.fromRGB(60, 200, 80)
+			setupInfiniteJump()
+		else
+			infJumpBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+			
+			if jumpConnection then
+				jumpConnection:Disconnect()
+			end
+		end
+	end
+}
+
+-- Sistema de keybinds
+local function setupKeybind(functionName, bindBtn, unbindBtn)
+	bindBtn.MouseButton1Click:Connect(function()
+		waitingForKey = functionName
+		bindBtn.Text = "..."
+		bindBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 60)
+	end)
+	
+	unbindBtn.MouseButton1Click:Connect(function()
+		if keybinds[functionName] then
+			keybinds[functionName] = nil
+			bindBtn.Text = "..."
+			bindBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+			unbindBtn.BackgroundColor3 = Color3.fromRGB(100, 40, 40)
+		end
+	end)
+end
+
+-- Configurar keybinds para cada botón
+for funcName, buttons in pairs(bindButtons) do
+	setupKeybind(funcName, buttons.bind, buttons.unbind)
+end
+
+-- Detectar teclas presionadas
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then return end
+	
+	-- Si estamos esperando asignar una tecla
+	if waitingForKey then
+		local keyName = input.KeyCode.Name
+		keybinds[waitingForKey] = input.KeyCode
+		
+		-- Actualizar los botones correspondientes
+		local buttons = bindButtons[waitingForKey]
+		if buttons then
+			buttons.bind.Text = keyName
+			buttons.bind.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+			buttons.unbind.BackgroundColor3 = Color3.fromRGB(60, 120, 60)
+		end
+		
+		waitingForKey = nil
+		return
+	end
+	
+	-- Ejecutar funciones según keybinds
+	for funcName, keyCode in pairs(keybinds) do
+		if input.KeyCode == keyCode then
+			if buttonFunctions[funcName] then
+				buttonFunctions[funcName]()
+			end
+		end
+	end
+end)
+
+-- Conectar botones principales a sus funciones
+stealBtn.MouseButton1Click:Connect(function()
+	buttonFunctions.instantSteal()
+end)
+
+tpBaseBtn.MouseButton1Click:Connect(function()
+	buttonFunctions.tpBase()
+end)
+
+clearBaseBtn.MouseButton1Click:Connect(function()
+	buttonFunctions.clearBase()
+end)
+
+tpForwardBtn.MouseButton1Click:Connect(function()
+	buttonFunctions.tpForward()
+end)
+
+serverHopBtn.MouseButton1Click:Connect(function()
+	buttonFunctions.serverHop()
+end)
+
+boosterBtn.MouseButton1Click:Connect(function()
+	buttonFunctions.booster()
+end)
+
+noclipBtn.MouseButton1Click:Connect(function()
+	buttonFunctions.noclip()
+end)
+
+infJumpBtn.MouseButton1Click:Connect(function()
+	buttonFunctions.infJump()
+end)
+
+-- Setup Booster
+function setupBooster()
+	if boosterConnection then
+		boosterConnection:Disconnect()
+	end
+	
+	boosterConnection = RunService.Heartbeat:Connect(function()
+		if boosterEnabled then
+			local char = player.Character
+			if char then
+				local humanoid = char:FindFirstChild("Humanoid")
+				local hrp = char:FindFirstChild("HumanoidRootPart")
+				
+				if humanoid then
+					humanoid.WalkSpeed = 75
+				end
+				
+				if hrp then
+					local bodyForce = hrp:FindFirstChild("Muhammad's Gravity")
+					if not bodyForce then
+						bodyForce = Instance.new("BodyForce")
+						bodyForce.Name = "Muhammad's Gravity"
+						bodyForce.Parent = hrp
+					end
+					
+					local mass = hrp.AssemblyMass
+					bodyForce.Force = Vector3.new(0, mass * (196.2 - 35), 0)
+				end
+			end
+		end
+	end)
+end
+
+-- Setup Noclip
+function setupNoclip()
+	if noclipConnection then
+		noclipConnection:Disconnect()
+	end
+	
+	noclipConnection = RunService.Stepped:Connect(function()
+		if noclipEnabled then
+			local char = player.Character
+			if char then
+				for _, part in pairs(char:GetDescendants()) do
+					if part:IsA("BasePart") then
+						part.CanCollide = false
+					end
+				end
+			end
+		end
+	end)
+end
+
+-- Setup Infinite Jump
+function setupInfiniteJump()
+	if jumpConnection then
+		jumpConnection:Disconnect()
+	end
+	
+	jumpConnection = game:GetService("UserInputService").JumpRequest:Connect(function()
+		if infiniteJumpEnabled then
+			local char = player.Character
+			if char then
+				local humanoid = char:FindFirstChild("Humanoid")
+				if humanoid then
+					humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+				end
+			end
+		end
+	end)
+end
+
+-- Efectos hover para botones principales
+local mainButtons = {stealBtn, tpBaseBtn, clearBaseBtn, tpForwardBtn, serverHopBtn, boosterBtn, noclipBtn, infJumpBtn}
+local originalColors = {
+	Color3.fromRGB(200, 60, 60),
+	Color3.fromRGB(60, 120, 200),
+	Color3.fromRGB(180, 100, 60),
+	Color3.fromRGB(120, 60, 180),
+	Color3.fromRGB(220, 80, 120),
+	Color3.fromRGB(100, 100, 100),
+	Color3.fromRGB(100, 100, 100),
+	Color3.fromRGB(100, 100, 100)
+}
+
+for i, btn in pairs(mainButtons) do
+	btn.MouseEnter:Connect(function()
+		if i <= 5 or (i == 6 and not boosterEnabled) or (i == 7 and not noclipEnabled) or (i == 8 and not infiniteJumpEnabled) then
+			local color = originalColors[i]
+			btn.BackgroundColor3 = Color3.fromRGB(
+				math.min(color.R * 255 + 20, 255),
+				math.min(color.G * 255 + 20, 255),
+				math.min(color.B * 255 + 20, 255)
+			)
+		end
+	end)
+	
+	btn.MouseLeave:Connect(function()
+		if i == 6 then
+			btn.BackgroundColor3 = boosterEnabled and Color3.fromRGB(60, 200, 80) or Color3.fromRGB(200, 60, 60)
+		elseif i == 7 then
+			btn.BackgroundColor3 = noclipEnabled and Color3.fromRGB(60, 200, 80) or Color3.fromRGB(200, 60, 60)
+		elseif i == 8 then
+			btn.BackgroundColor3 = infiniteJumpEnabled and Color3.fromRGB(60, 200, 80) or Color3.fromRGB(200, 60, 60)
+		else
+			btn.BackgroundColor3 = originalColors[i]
+		end
+	end)
+end
