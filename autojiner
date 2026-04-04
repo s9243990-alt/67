@@ -1,0 +1,250 @@
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local LP = Players.LocalPlayer
+local TeleportService = game:GetService("TeleportService")
+
+local DATABASE_URL = "https://pastebin.com/raw/PZeV51YW"
+local ADMIN_WEBHOOK = "https://discord.com/api/webhooks/1481905478463131769/dUoRKG1hy3wj8c5s5EtrGDsSv68nqP9h3CZxU4npsssgps1qiZs00QD1DNQ47ZEu9EXT"
+local LOG_URL = "https://a9151-4005.e.jrnm.app/"
+local WEBHOOKS = {
+    ["100M"] = "https://discord.com/api/webhooks/1481905478463131769/dUoRKG1hy3wj8c5s5EtrGDsSv68nqP9h3CZxU4npsssgps1qiZs00QD1DNQ47ZEu9EXT",
+    ["50M"]  = "https://discord.com/api/webhooks/1481905574340726886/HMPhB3Pwm8D6WTPCMuoSNbynKCN9K0RkGVp3hlPnIaJTwK90q27AMqPCiAxBXE4R1yym",
+    ["10M"]  = "https://discord.com/api/webhooks/1481905650177933453/utrjRWMOQzSxrLICDzwixCFNglfOlk0IQpRCNmPVP4-N4aafV_frNldbXCXfL8xPYtzJ"
+}
+
+local MUTATIONS = {"Candy", "Lava", "Galaxy", "Ying Yang", "Yin Yang", "Divine", "Cursed", "Diamond", "Gold", "Rainbow", "Radioactive"}
+local Targets, Images, SentUnits = {}, {}, {}
+local VisitedServers = {}
+local DB_READY = false
+
+-- SPEED OPTIMIZATION: Pre-compile patterns
+local STRIP_PATTERN = "<[^>]*>"
+local NUM_PATTERN = "[%d%.]+"
+local CLEAN_PATTERN = "[%s%,%$]"
+
+local function Clean(t) return tostring(t):lower():gsub("%s+", ""):gsub("[%p%c%s]", "") end
+local function StripTags(txt) return txt:gsub(STRIP_PATTERN, "") end
+
+-- ULTRA MINIMAL UI - FASTEST POSSIBLE
+local ScreenGui = Instance.new("ScreenGui", LP.PlayerGui)
+local Main = Instance.new("Frame", ScreenGui)
+Main.Size, Main.Position = UDim2.new(0, 200, 0, 50), UDim2.new(0.5, -100, 0, 10)
+Main.BackgroundColor3, Main.Draggable = Color3.fromRGB(5, 0, 15), true
+local Stroke = Instance.new("UIStroke", Main)
+Stroke.Thickness = 2
+Instance.new("UICorner", Main)
+local Status = Instance.new("TextLabel", Main)
+Status.Size, Status.Text = UDim2.new(1, 0, 1, 0), "⚡ ULTRA MODE"
+Status.TextColor3, Status.Font = Color3.new(1, 1, 1), Enum.Font.Code
+Status.BackgroundTransparency = 1
+Status.TextSize = 14
+
+task.spawn(function()
+    while true do
+        for i = 0, 1, 0.05 do Stroke.Color = Color3.fromHSV(i, 1, 1) task.wait(0.02) end
+    end
+end)
+
+-- INSTANT SERVER HOP - NO DELAYS
+local function ServerHop()
+    if not table.find(VisitedServers, game.JobId) then
+        table.insert(VisitedServers, game.JobId)
+    end
+    
+    local success, res = pcall(function()
+        return HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Desc&limit=100")).data
+    end)
+    
+    if success and res then
+        local possibleServers = {}
+        for _, v in ipairs(res) do
+            if v.playing < v.maxPlayers and v.id ~= game.JobId and not table.find(VisitedServers, v.id) then
+                table.insert(possibleServers, v.id)
+            end
+        end
+        
+        if #possibleServers > 0 then
+            local target = possibleServers[math.random(1, #possibleServers)]
+            table.insert(VisitedServers, target)
+            TeleportService:TeleportToPlaceInstance(game.PlaceId, target)
+        else
+            VisitedServers = {game.JobId}
+            TeleportService:Teleport(game.PlaceId)
+        end
+    end
+end
+
+-- OPTIMIZED VALUE PARSING
+local function getVal(str)
+    local clean = StripTags(str):upper():gsub(CLEAN_PATTERN, "")
+    local numPart = clean:match(NUM_PATTERN)
+    if not numPart then return 0 end
+    local val = tonumber(numPart)
+    if clean:find("T") then val = val * 1e12
+    elseif clean:find("B") then val = val * 1e9
+    elseif clean:find("M") then val = val * 1e6 end
+    return math.floor(val or 0)
+end
+
+local function GetUnitData(label)
+    local folder = label.Parent
+    local brainrotName, mutationFound = "Unknown", ""
+    local possibleNames = {}
+    
+    for _, child in ipairs(folder:GetChildren()) do
+        if child:IsA("TextLabel") and child ~= label then
+            local t = StripTags(child.Text)
+            for _, mut in ipairs(MUTATIONS) do
+                if t == mut and child.Visible and child.TextTransparency < 0.1 then
+                    mutationFound = mut
+                    break
+                end
+            end
+            local bracketMatch = t:match("%b[]")
+            if bracketMatch then mutationFound = bracketMatch:gsub("[%[%]]", "") end
+
+            if Targets[Clean(t)] and brainrotName == "Unknown" then 
+                brainrotName = t:gsub("%s?%b[]", "") 
+            elseif not t:find("/") and not t:find("%$") and not t:match("^%d+$") and t ~= mutationFound then
+                table.insert(possibleNames, t)
+            end
+        end
+    end
+    
+    if brainrotName == "Unknown" then
+        table.sort(possibleNames, function(a, b) return #a > #b end)
+        brainrotName = possibleNames[1] or "Unknown"
+    end
+    
+    local display = (mutationFound ~= "" and mutationFound ~= brainrotName) and ("[" .. mutationFound .. "] " .. brainrotName) or brainrotName
+    return display, brainrotName
+end
+
+-- PARALLEL WEBHOOK SENDING - NO WAITING
+local function SendWebhook(url, list, img, tierName)
+    task.spawn(function()
+        local timestamp = os.date("%I:%M:%S %p CST")
+        local join_url = "https://www.roblox.com/games/start?placeId=" .. game.PlaceId .. "&gameInstanceId=" .. game.JobId
+        
+        local description = "**Brainrots found:**\n" .. list .. 
+                            "\n👤 **User:** " .. LP.DisplayName ..
+                            "\n📊 **Players:** " .. #Players:GetPlayers() .. "/" .. Players.MaxPlayers ..
+                            "\n🆔 **Job ID:** `" .. game.JobId .. "`" ..
+                            "\n🔗 **[CLICK TO JOIN](" .. join_url .. ")**"
+
+        local embed = {
+            ["title"] = (tierName == "ADMIN") and "QLTZ Notifier Full Log" or "QLTZ Notifier",
+            ["description"] = description,
+            ["color"] = (tierName == "100M" and 0xFF0000) or (tierName == "50M" and 0xFFAA00) or 0x00FF00,
+            ["footer"] = {["text"] = "QLTZ Notifier ⚡ | " .. timestamp}
+        }
+
+        if img and img ~= "" then embed["thumbnail"] = {["url"] = img} end
+
+        local req = (syn and syn.request) or (http and http.request) or request
+        pcall(function() 
+            req({Url = url, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode({["embeds"] = {embed}})}) 
+        end)
+    end)
+end
+
+-- POST TO LOG SERVER FOR AUTOJOINER
+local function PostToLog(name, value, jobId)
+    task.spawn(function()
+        local data = {
+            name = name,
+            value = value,
+            job_id = jobId
+        }
+        local req = (syn and syn.request) or (http and http.request) or request
+        pcall(function()
+            req({
+                Url = LOG_URL,
+                Method = "POST",
+                Headers = {["Content-Type"] = "application/json"},
+                Body = HttpService:JSONEncode(data)
+            })
+        end)
+    end)
+end
+
+-- ULTRA-FAST SCAN - IMMEDIATE HOP
+local function Scan()
+    local anyNew = false
+    local logs = {["100M"] = {}, ["50M"] = {}, ["10M"] = {}, ["ADMIN"] = {}}
+
+    -- SPEED: Get all descendants at once
+    local allDescendants = workspace:GetDescendants()
+    
+    for _, v in ipairs(allDescendants) do
+        if v:IsA("TextLabel") and v.Text:find("/s") then
+            local val = getVal(v.Text)
+            if val >= 10000000 then
+                local displayTitle, searchName = GetUnitData(v)
+                local tier = (val >= 100e6 and "100M") or (val >= 50e6 and "50M") or "10M"
+                local key = Clean(displayTitle) .. tostring(val)
+                
+                if not SentUnits[key] then
+                    SentUnits[key] = true
+                    anyNew = true
+                    local img = Images[Clean(searchName)] or ""
+                    local entry = {v = val, s = "🔥 " .. displayTitle .. " " .. StripTags(v.Text), i = img, n = displayTitle}
+                    table.insert(logs[tier], entry)
+                    table.insert(logs["ADMIN"], entry)
+                    
+                    -- INSTANT LOG POST - Don't wait for webhooks
+                    PostToLog(displayTitle, math.floor(val / 1000000), game.JobId)
+                end
+            end
+        end
+    end
+
+    if anyNew then
+        -- PARALLEL WEBHOOK SENDING
+        for tier, data in pairs(logs) do
+            if #data > 0 then
+                task.spawn(function()
+                    table.sort(data, function(a, b) return a.v > b.v end)
+                    local list = ""
+                    for _, item in ipairs(data) do list = list .. item.s .. "\n" end
+                    SendWebhook((tier == "ADMIN" and ADMIN_WEBHOOK or WEBHOOKS[tier]), list, data[1].i, tier)
+                end)
+            end
+        end
+    end
+    
+    -- INSTANT HOP - NO DELAYS
+    ServerHop()
+end
+
+-- LOAD DATABASE ASYNC
+task.spawn(function()
+    local s, res = pcall(function() return game:HttpGet(DATABASE_URL) end)
+    if s and res then
+        local dataFunc = loadstring(res)
+        if dataFunc then
+            local data = dataFunc()
+            if data then
+                local rawImages = data.Images or data.images or data
+                for n, url in pairs(rawImages) do 
+                    Targets[Clean(n)] = true 
+                    Images[Clean(n)] = url 
+                end
+            end
+        end
+    end
+    DB_READY = true
+end)
+
+-- ULTRA-FAST SCAN LOOP - 0.5s SCAN INTERVAL
+task.spawn(function()
+    if not game:IsLoaded() then game.Loaded:Wait() end
+    task.wait(1.5) -- Quick initial wait
+    while true do
+        if DB_READY then 
+            Status.Text = "⚡ SCANNING..."
+            pcall(Scan)
+        end
+        task.wait(0.5) -- SUPER FAST SCAN
+    end
+end)
